@@ -601,6 +601,7 @@ ${JSON.stringify({
   uniqueCards: activity.uniqueCards,
   cardReviews: activity.cardReviews,
   matchingAttempts: activity.matchingAttempts,
+  studyTime: activity.studyTime,
   effort,
 })}`;
 }
@@ -614,6 +615,8 @@ function activityFacts(activity, periodLabel = "сегодня") {
   const uniqueCards = uniqueCardCount(activity);
   const cardReviews = cardReviewCount(activity);
   const games = matchingGameCount(activity);
+  const matchingPairs = matchingPairCount(activity);
+  const studyTime = studyTimeText(activity);
   if (uniqueCards > 0) {
     facts.push(`${uniqueCards} ${cardLabel(uniqueCards)} уникально`);
   }
@@ -622,6 +625,12 @@ function activityFacts(activity, periodLabel = "сегодня") {
   }
   if (games > 0) {
     facts.push(`${games} ${gameLabel(games)} в Колонки`);
+  }
+  if (matchingPairs > 0) {
+    facts.push(`${matchingPairs} ${pairLabel(matchingPairs)} собрано в Колонках`);
+  }
+  if (studyTime) {
+    facts.push(`время занятий: ${studyTime}`);
   }
   return facts.join("; ") || `${capitalize(periodLabel)} есть занятия.`;
 }
@@ -632,11 +641,12 @@ function activityEffort(activity) {
   }
   const studyCount = cardReviewCount(activity);
   const matchingCount = matchingGameCount(activity);
+  const matchingPairs = matchingPairCount(activity);
 
-  if (studyCount >= 30 || (studyCount >= 20 && matchingCount >= 1) || matchingCount >= 4) {
+  if (studyCount >= 30 || matchingPairs >= 60 || (studyCount >= 20 && matchingCount >= 1) || matchingCount >= 4) {
     return "strong";
   }
-  if (studyCount >= 10 || matchingCount >= 2 || (studyCount >= 5 && matchingCount >= 1)) {
+  if (studyCount >= 10 || matchingPairs >= 20 || matchingCount >= 2 || (studyCount >= 5 && matchingCount >= 1)) {
     return "medium";
   }
   return "small";
@@ -1101,6 +1111,18 @@ function gameLabel(count) {
   return "игр";
 }
 
+function pairLabel(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "пара";
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "пары";
+  }
+  return "пар";
+}
+
 function uniqueCardCount(activity) {
   return numberField(activity.uniqueCards?.total, activity.studyReviews?.total);
 }
@@ -1117,6 +1139,18 @@ function matchingGameCount(activity) {
     activity.matchingAttempts?.total,
     numberField(activity.matchingAttempts?.columns) + numberField(activity.matchingAttempts?.audioColumns),
   );
+}
+
+function matchingPairCount(activity) {
+  return numberField(activity.matchingAttempts?.pairsMatched);
+}
+
+function studyTimeText(activity) {
+  const text = activity.studyTime?.text;
+  if (typeof text !== "string" || !text.trim() || text === "0 сек") {
+    return "";
+  }
+  return text.trim();
 }
 
 function numberField(...values) {
