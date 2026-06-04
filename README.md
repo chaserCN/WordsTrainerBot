@@ -53,7 +53,6 @@ Optional env:
 - `TELEGRAM_COMMAND_POLL_TIMEOUT_SECONDS` - Telegram long-poll timeout for
   commands. Defaults to `25`.
 - `STATE_FILE` - file used to prevent duplicate daily sends.
-- `REMINDER_TEXT` - message when the learner had no activity.
 - `LLM_ENABLED` - enables LLM formatting when `true`. Defaults to enabled only
   if a provider API key is set.
 - `LLM_PROVIDER` - `gemini`, `openai`, or `anthropic`.

@@ -11,6 +11,7 @@ const dateArg = rawArgs.find((arg) => arg.startsWith("--date="))?.slice("--date=
 const providerArg = rawArgs.find((arg) => arg.startsWith("--provider="))?.slice("--provider=".length);
 const jobArg = rawArgs.find((arg) => arg.startsWith("--job="))?.slice("--job=".length);
 const dryRun = args.has("--dry-run");
+const reminderText = "Повтори картыыыыыы. Хотя бы 5 минут.";
 
 if (args.has("--help")) {
   printHelp();
@@ -31,7 +32,6 @@ const config = {
   pollIntervalSeconds: integerEnv("POLL_INTERVAL_SECONDS", 60),
   telegramCommandPollTimeoutSeconds: integerEnv("TELEGRAM_COMMAND_POLL_TIMEOUT_SECONDS", 25),
   stateFile: process.env.STATE_FILE || ".state/daily-report.json",
-  reminderText: process.env.REMINDER_TEXT || "Повтори картыыыыыы. Хотя бы 5 минут.",
   llmProvider: provider(providerArg || process.env.LLM_PROVIDER || "gemini"),
   llmEnabled: booleanEnv(
     "LLM_ENABLED",
@@ -364,7 +364,7 @@ function formatFallbackMessage(activity, options = {}) {
       const periodLabel = options.periodLabel || "сегодня";
       return `${profile.displayName}: ${periodLabel} ${inactivePastVerb(profile.gender)}. Карты скучали без дела.`;
     }
-    return `${stretchedName(profile.displayName)}! ${config.reminderText}`;
+    return `${stretchedName(profile.displayName)}! ${reminderText}`;
   }
 
   const effort = activityEffort(activity);
