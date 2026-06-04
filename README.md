@@ -60,7 +60,7 @@ Optional env:
 - `GEMINI_MODEL` - defaults to `gemini-2.5-flash`.
 - `GEMINI_API_BASE_URL` - defaults to the public Gemini v1beta REST API.
 - `OPENAI_API_KEY` - OpenAI API key.
-- `OPENAI_MODEL` - defaults to `gpt-5.4-mini`.
+- `OPENAI_MODEL` - defaults to `gpt-5.4`.
 - `OPENAI_API_BASE_URL` - defaults to `https://api.openai.com/v1`.
 - `ANTHROPIC_API_KEY` - Anthropic API key.
 - `ANTHROPIC_MODEL` - defaults to `claude-haiku-4-5`.

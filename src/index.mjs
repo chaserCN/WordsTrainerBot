@@ -42,9 +42,9 @@ const config = {
   geminiApiBaseUrl: (process.env.GEMINI_API_BASE_URL || "https://generativelanguage.googleapis.com/v1beta")
     .replace(/\/+$/, ""),
   openaiApiKey: process.env.OPENAI_API_KEY || "",
-  openaiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+  openaiModel: process.env.OPENAI_MODEL || "gpt-5.4",
   openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT
-    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
+    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5.4"),
   openaiApiBaseUrl: (process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, ""),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5",
