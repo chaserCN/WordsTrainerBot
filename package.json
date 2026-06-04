@@ -1,0 +1,20 @@
+{
+  "name": "words-trainer-telegram-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "updates": "node scripts/telegram-updates.mjs",
+    "once": "node src/index.mjs --once --job=morning-report",
+    "morning": "node src/index.mjs --once --job=morning-report",
+    "stats": "node src/index.mjs --once --job=stats",
+    "reminders": "node src/index.mjs --once --job=evening-reminders",
+    "dry-run": "node src/index.mjs --once --dry-run --job=morning-report",
+    "dry-run-stats": "node src/index.mjs --once --dry-run --job=stats",
+    "dry-run-reminders": "node src/index.mjs --once --dry-run --job=evening-reminders"
+  }
+}
