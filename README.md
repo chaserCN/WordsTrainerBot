@@ -52,7 +52,8 @@ Optional env:
 - `POLL_INTERVAL_SECONDS` - scheduler check interval. Defaults to `60`.
 - `TELEGRAM_COMMAND_POLL_TIMEOUT_SECONDS` - Telegram long-poll timeout for
   commands. Defaults to `25`.
-- `STATE_FILE` - file used to prevent duplicate daily sends.
+- `STATE_FILE` - file used to prevent duplicate daily sends. Defaults to
+  `/data/daily-report.json` for Railway volume persistence.
 - `LLM_ENABLED` - enables LLM formatting when `true`. Defaults to enabled only
   if a provider API key is set.
 - `LLM_PROVIDER` - `gemini`, `openai`, or `anthropic`.

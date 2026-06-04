@@ -33,7 +33,7 @@ const config = {
   eveningReminderRetryMinute: integerEnv("EVENING_REMINDER_RETRY_MINUTE", 5),
   pollIntervalSeconds: integerEnv("POLL_INTERVAL_SECONDS", 60),
   telegramCommandPollTimeoutSeconds: integerEnv("TELEGRAM_COMMAND_POLL_TIMEOUT_SECONDS", 25),
-  stateFile: process.env.STATE_FILE || ".state/daily-report.json",
+  stateFile: process.env.STATE_FILE || "/data/daily-report.json",
   llmProvider: provider(providerArg || process.env.LLM_PROVIDER || "gemini"),
   llmEnabled: booleanEnv(
     "LLM_ENABLED",
