@@ -12,6 +12,8 @@ const providerArg = rawArgs.find((arg) => arg.startsWith("--provider="))?.slice(
 const jobArg = rawArgs.find((arg) => arg.startsWith("--job="))?.slice("--job=".length);
 const dryRun = args.has("--dry-run");
 const reminderText = "Повтори картыыыыыы. Хотя бы 5 минут.";
+const serverFetchRetries = 2;
+const serverFetchRetryDelayMs = 1_000;
 
 if (args.has("--help")) {
   printHelp();
@@ -51,10 +53,20 @@ const config = {
   anthropicApiBaseUrl: (process.env.ANTHROPIC_API_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, ""),
 };
 
-if (args.has("--once")) {
-  await runJob(jobArg || "morning-report", { dryRun, dateArg, now: new Date() });
-} else {
-  await runScheduler();
+try {
+  if (args.has("--once")) {
+    await runJob(jobArg || "morning-report", { dryRun, dateArg, now: new Date() });
+  } else {
+    await runScheduler();
+  }
+} catch (error) {
+  logError("Bot command failed", error, {
+    mode: args.has("--once") ? "once" : "scheduler",
+    job: jobArg || (args.has("--once") ? "morning-report" : null),
+    dryRun,
+    dateArg,
+  });
+  process.exit(1);
 }
 
 async function runScheduler() {
@@ -68,13 +80,13 @@ async function runScheduler() {
   );
 
   runTelegramCommandListener().catch((error) => {
-    console.error("Telegram command listener stopped:", error);
+    logError("Telegram command listener stopped", error);
   });
 
   await maybeRunDueJobs();
   setInterval(() => {
     maybeRunDueJobs().catch((error) => {
-      console.error("Scheduled jobs failed:", error);
+      logError("Scheduled jobs failed", error);
     });
   }, Math.max(10, config.pollIntervalSeconds) * 1000);
 }
@@ -91,7 +103,7 @@ async function runTelegramCommandListener() {
       }
       await pollTelegramCommands(botUsername);
     } catch (error) {
-      console.error("Telegram command polling failed:", error.message);
+      logError("Telegram command polling failed", error);
       await sleep(5_000);
     }
   }
@@ -105,10 +117,11 @@ async function pollTelegramCommands(botUsername) {
   });
 
   for (const update of updates) {
+    const context = telegramUpdateLogContext(update, botUsername);
     try {
       await handleTelegramUpdate(update, botUsername);
     } catch (error) {
-      console.error(`Telegram update ${update.update_id} failed:`, error.message);
+      logError("Telegram update failed", error, context);
     } finally {
       await saveTelegramUpdateOffset(update.update_id + 1);
     }
@@ -157,6 +170,18 @@ function parseTelegramCommand(text, botUsername) {
     return null;
   }
   return command;
+}
+
+function telegramUpdateLogContext(update, botUsername) {
+  const message = update.message || update.edited_message;
+  const command = message?.text ? parseTelegramCommand(message.text, botUsername) : null;
+  return {
+    updateId: update.update_id,
+    command: command ? `/${command}` : null,
+    chatId: message?.chat?.id ?? null,
+    chatType: message?.chat?.type ?? null,
+    fromId: message?.from?.id ?? null,
+  };
 }
 
 function isConfiguredTelegramChat(chatId) {
@@ -229,10 +254,12 @@ async function fetchDailyActivities(dayKey) {
 
 async function fetchUsers() {
   const url = new URL("/v1/admin/users", config.apiBaseUrl);
-  const response = await fetchJson(url, {
+  const response = await fetchServerJson(url, {
     headers: {
       Authorization: `Bearer ${config.adminApiKey}`,
     },
+  }, {
+    label: "server admin users",
   });
   return (response.users || []).filter((user) => user.role === "learner");
 }
@@ -242,10 +269,13 @@ async function fetchDailyActivity(dayKey, userId) {
   url.searchParams.set("dayKey", dayKey);
   url.searchParams.set("timeZone", config.timeZone);
 
-  return await fetchJson(url, {
+  return await fetchServerJson(url, {
     headers: {
       Authorization: `Bearer ${config.adminApiKey}`,
     },
+  }, {
+    label: "server daily activity",
+    fields: { dayKey, userId },
   });
 }
 
@@ -349,9 +379,21 @@ async function formatDailyMessage(activity, options = {}) {
       if (text?.trim()) {
         return text;
       }
-      console.warn(`${config.llmProvider} returned empty text, using fallback`);
+      logWarn("LLM returned empty text; using fallback", {
+        provider: config.llmProvider,
+        model: providerModel(config.llmProvider),
+        kind: options.kind || "report",
+        dayKey: activity.dayKey,
+        userId: activity.userId || activity.user_id || activity.user?.id || null,
+      });
     } catch (error) {
-      console.warn(`${config.llmProvider} formatting failed, using fallback:`, error.message);
+      logError("LLM formatting failed; using fallback", error, {
+        provider: config.llmProvider,
+        model: providerModel(config.llmProvider),
+        kind: options.kind || "report",
+        dayKey: activity.dayKey,
+        userId: activity.userId || activity.user_id || activity.user?.id || null,
+      });
     }
   }
   return formatFallbackMessage(activity, options);
@@ -693,21 +735,144 @@ async function sendTelegramMessage(text, { chatId = null } = {}) {
   });
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${text}`);
+async function fetchServerJson(url, options, request = {}) {
+  return await fetchJson(url, options, {
+    ...request,
+    retries: serverFetchRetries,
+    retryDelayMs: serverFetchRetryDelayMs,
+  });
+}
+
+async function fetchJson(url, options = {}, request = {}) {
+  const method = options.method || "GET";
+  const retries = request.retries || 0;
+  const retryDelayMs = request.retryDelayMs || 0;
+  const label = request.label || `${method} ${url.pathname}`;
+  const fields = request.fields || {};
+  const attempts = retries + 1;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+      const text = await response.text();
+      if (!response.ok) {
+        const error = httpError(response, text);
+        annotateRequestError(error, { url, method, label, attempt, attempts, fields });
+        if (attempt < attempts && isRetryableHttpStatus(response.status)) {
+          logWarn("HTTP request failed; retrying", { error: serializeError(error) });
+          await sleep(retryDelayMs);
+          continue;
+        }
+        throw error;
+      }
+      try {
+        return text ? JSON.parse(text) : null;
+      } catch (error) {
+        annotateRequestError(error, { url, method, label, attempt, attempts, fields });
+        throw error;
+      }
+    } catch (error) {
+      annotateRequestError(error, { url, method, label, attempt, attempts, fields });
+      if (attempt < attempts && isRetryableFetchError(error)) {
+        logWarn("HTTP request failed; retrying", { error: serializeError(error) });
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
   }
-  return text ? JSON.parse(text) : null;
 }
 
 async function fetchTelegramJson(url, options) {
-  const payload = await fetchJson(url, options);
+  const payload = await fetchJson(url, options, {
+    label: `telegram ${url.pathname.split("/").at(-1)}`,
+  });
   if (!payload?.ok) {
-    throw new Error(`Telegram API failed: ${payload?.description || "unknown error"}`);
+    const error = new Error(`Telegram API failed: ${payload?.description || "unknown error"}`);
+    error.telegramErrorCode = payload?.error_code || null;
+    throw error;
   }
   return payload.result;
+}
+
+function httpError(response, body) {
+  const error = new Error(`${response.status} ${response.statusText}`);
+  error.httpStatus = response.status;
+  error.httpStatusText = response.statusText;
+  error.responseBody = body?.slice(0, 500) || "";
+  return error;
+}
+
+function annotateRequestError(error, { url, method, label, attempt, attempts, fields }) {
+  if (!error.request) {
+    error.request = {};
+  }
+  Object.assign(error.request, {
+    label,
+    method,
+    path: `${url.pathname}${url.search}`,
+    origin: url.origin,
+    attempt,
+    attempts,
+    ...fields,
+  });
+}
+
+function isRetryableHttpStatus(status) {
+  return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function isRetryableFetchError(error) {
+  if (error.httpStatus) {
+    return false;
+  }
+  const code = error.cause?.code || error.code;
+  return error.name === "AbortError"
+    || error.message === "fetch failed"
+    || code === "UND_ERR_CONNECT_TIMEOUT"
+    || code === "UND_ERR_HEADERS_TIMEOUT"
+    || code === "UND_ERR_SOCKET"
+    || code === "ECONNRESET"
+    || code === "ECONNREFUSED"
+    || code === "ETIMEDOUT"
+    || code === "EAI_AGAIN";
+}
+
+function logError(message, error, fields = {}) {
+  console.error(JSON.stringify({
+    level: "error",
+    message,
+    ...compactObject(fields),
+    error: serializeError(error),
+  }));
+}
+
+function logWarn(message, fields = {}) {
+  console.warn(JSON.stringify({
+    level: "warn",
+    message,
+    ...compactObject(fields),
+  }));
+}
+
+function serializeError(error) {
+  return compactObject({
+    name: error?.name,
+    message: error?.message,
+    code: error?.code,
+    httpStatus: error?.httpStatus,
+    httpStatusText: error?.httpStatusText,
+    telegramErrorCode: error?.telegramErrorCode,
+    causeName: error?.cause?.name,
+    causeMessage: error?.cause?.message,
+    causeCode: error?.cause?.code,
+    responseBody: error?.responseBody,
+    request: error?.request ? compactObject(error.request) : null,
+  });
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue != null && fieldValue !== ""));
 }
 
 async function loadDotEnv(filePath = path.resolve(process.cwd(), ".env")) {
@@ -793,6 +958,16 @@ function providerApiKey(providerName) {
     return config.anthropicApiKey;
   }
   return config.geminiApiKey;
+}
+
+function providerModel(providerName) {
+  if (providerName === "openai") {
+    return config.openaiModel;
+  }
+  if (providerName === "anthropic") {
+    return config.anthropicModel;
+  }
+  return config.geminiModel;
 }
 
 function dueJobs(date) {
