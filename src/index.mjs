@@ -42,9 +42,9 @@ const config = {
   geminiApiBaseUrl: (process.env.GEMINI_API_BASE_URL || "https://generativelanguage.googleapis.com/v1beta")
     .replace(/\/+$/, ""),
   openaiApiKey: process.env.OPENAI_API_KEY || "",
-  openaiModel: process.env.OPENAI_MODEL || "gpt-5-mini",
+  openaiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
   openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT
-    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5-mini"),
+    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
   openaiApiBaseUrl: (process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, ""),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5",
@@ -431,7 +431,7 @@ function geminiGenerationConfig() {
 }
 
 function defaultOpenAIReasoningEffort(model) {
-  if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1")) {
+  if (/^gpt-5\.[1-9]/.test(model)) {
     return "none";
   }
   return "minimal";
