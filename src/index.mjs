@@ -76,8 +76,10 @@ async function runScheduler() {
       `morning-report ${pad2(config.morningReportHour)}:${pad2(config.morningReportMinute)}`,
       `evening-reminders ${pad2(config.eveningReminderHour)}:${pad2(config.eveningReminderMinute)}`,
       `retry minute ${pad2(config.eveningReminderHour)}:${pad2(config.eveningReminderRetryMinute)}`,
+      `state file ${config.stateFile}`,
     ].join("; "),
   );
+  await logStateSnapshot("scheduler startup");
 
   runTelegramCommandListener().catch((error) => {
     logError("Telegram command listener stopped", error);
@@ -115,6 +117,14 @@ async function pollTelegramCommands(botUsername) {
     offset: state.telegramUpdateOffset,
     timeoutSeconds: config.telegramCommandPollTimeoutSeconds,
   });
+  if (updates.length > 0 || state.telegramUpdateOffset == null) {
+    logInfo("Telegram updates polled", {
+      botUsername,
+      offset: state.telegramUpdateOffset ?? null,
+      updateCount: updates.length,
+      updateIds: updates.map((update) => update.update_id),
+    });
+  }
 
   for (const update of updates) {
     const context = telegramUpdateLogContext(update, botUsername);
@@ -207,11 +217,21 @@ async function saveTelegramUpdateOffset(offset) {
   const state = await readState();
   state.telegramUpdateOffset = offset;
   await writeState(state);
+  logInfo("Telegram update offset saved", { offset });
 }
 
 async function maybeRunDueJobs() {
   const now = new Date();
-  for (const jobName of dueJobs(now)) {
+  const jobs = dueJobs(now);
+  if (jobs.length > 0) {
+    const local = localHourMinute(now, config.timeZone);
+    logInfo("Due jobs resolved", {
+      now: now.toISOString(),
+      localTime: `${pad2(local.hour)}:${pad2(local.minute)}`,
+      jobs,
+    });
+  }
+  for (const jobName of jobs) {
     await runJob(jobName, { dryRun: false, now });
   }
 }
@@ -282,6 +302,14 @@ async function fetchDailyActivity(dayKey, userId) {
 async function sendMorningReport(dayKey, { dryRun }) {
   const stateKey = sentStateKey("morning-report", dayKey);
   const state = dryRun ? null : await readState();
+  if (!dryRun) {
+    logInfo("Morning report state check", {
+      dayKey,
+      stateKey,
+      alreadySent: isSent(state, stateKey),
+      ...stateSummary(state),
+    });
+  }
   if (!dryRun && isSent(state, stateKey)) {
     console.log(`Morning report already sent for ${dayKey}`);
     return;
@@ -306,6 +334,9 @@ async function sendMorningReport(dayKey, { dryRun }) {
 }
 
 async function sendStatsReport(dayKey, { dryRun, chatId = null }) {
+  if (!dryRun) {
+    logInfo("Stats report requested", { dayKey, chatId: chatId ?? "default" });
+  }
   const activities = await fetchDailyActivities(dayKey);
   const message = await formatStatsMessage(activities, {
     heading: "Статистика за сегодня:",
@@ -325,6 +356,14 @@ async function sendStatsReport(dayKey, { dryRun, chatId = null }) {
 async function sendEveningReminders(dayKey, { dryRun }) {
   const jobStateKey = sentStateKey("evening-reminders", dayKey);
   const state = dryRun ? null : await readState();
+  if (!dryRun) {
+    logInfo("Evening reminders state check", {
+      dayKey,
+      jobStateKey,
+      alreadyChecked: isSent(state, jobStateKey),
+      ...stateSummary(state),
+    });
+  }
   if (!dryRun && isSent(state, jobStateKey)) {
     console.log(`Evening reminders already checked for ${dayKey}`);
     return;
@@ -337,6 +376,15 @@ async function sendEveningReminders(dayKey, { dryRun }) {
   for (const activity of inactiveActivities) {
     const userId = activity.user?.id || activity.user_id || activity.userId || learnerProfile(activity).displayName;
     const stateKey = sentStateKey("evening-reminder", dayKey, userId);
+    if (!dryRun) {
+      logInfo("Evening reminder learner state check", {
+        dayKey,
+        userId,
+        stateKey,
+        alreadySent: isSent(state, stateKey),
+        active: activity.active,
+      });
+    }
     if (!dryRun && isSent(state, stateKey)) {
       continue;
     }
@@ -858,6 +906,14 @@ function logWarn(message, fields = {}) {
   }));
 }
 
+function logInfo(message, fields = {}) {
+  console.log(JSON.stringify({
+    level: "info",
+    message,
+    ...compactObject(fields),
+  }));
+}
+
 function serializeError(error) {
   return compactObject({
     name: error?.name,
@@ -1021,11 +1077,20 @@ function previousStudyDayKey(date, timeZone) {
 }
 
 async function readState() {
+  return (await readStateFile()).state;
+}
+
+async function readStateFile() {
   try {
-    return JSON.parse(await readFile(config.stateFile, "utf8"));
+    const content = await readFile(config.stateFile, "utf8");
+    return {
+      state: JSON.parse(content),
+      exists: true,
+      byteSize: Buffer.byteLength(content),
+    };
   } catch (error) {
     if (error.code === "ENOENT") {
-      return {};
+      return { state: {}, exists: false, byteSize: 0 };
     }
     throw error;
   }
@@ -1049,6 +1114,27 @@ function markSent(state, key) {
 async function writeState(state) {
   await mkdir(path.dirname(config.stateFile), { recursive: true });
   await writeFile(config.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  logInfo("State file written", stateSummary(state));
+}
+
+async function logStateSnapshot(label) {
+  const { state, exists, byteSize } = await readStateFile();
+  logInfo("State snapshot", {
+    label,
+    stateFileExists: exists,
+    stateFileByteSize: byteSize,
+    ...stateSummary(state),
+  });
+}
+
+function stateSummary(state) {
+  const sentKeys = Object.keys(state.sent || {}).sort();
+  return {
+    stateFile: config.stateFile,
+    telegramUpdateOffset: state.telegramUpdateOffset ?? null,
+    sentKeyCount: sentKeys.length,
+    sentKeys,
+  };
 }
 
 function capitalize(value) {
