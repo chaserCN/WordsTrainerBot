@@ -411,9 +411,12 @@ function formatFallbackMessage(activity, options = {}) {
 
   const effort = activityEffort(activity);
   const periodLabel = options.periodLabel || "сегодня";
+  const uniqueCards = uniqueCardCount(activity);
+  const cardReviews = cardReviewCount(activity);
+  const games = matchingGameCount(activity);
   return [
     `${profile.displayName}: ${periodLabel} есть занятия.`,
-    `Карточки: ${activity.studyReviews.total} ${cardLabel(activity.studyReviews.total)}, практика: ${activity.practiceReviews.total}, колонки: ${activity.matchingAttempts.columns}, аудио-колонки: ${activity.matchingAttempts.audioColumns}.`,
+    `Карточки: ${uniqueCards} ${cardLabel(uniqueCards)}, просмотров: ${cardReviews}, игры: ${games}.`,
     fallbackClosing(effort),
   ].join("\n");
 }
@@ -595,8 +598,8 @@ ${JSON.stringify({
   periodLabel,
   active: activity.active,
   dayKey: activity.dayKey,
-  studyReviews: activity.studyReviews,
-  practiceReviews: activity.practiceReviews,
+  uniqueCards: activity.uniqueCards,
+  cardReviews: activity.cardReviews,
   matchingAttempts: activity.matchingAttempts,
   effort,
 })}`;
@@ -608,17 +611,17 @@ function activityFacts(activity, periodLabel = "сегодня") {
   }
 
   const facts = [];
-  if (activity.studyReviews.total > 0) {
-    facts.push(`${activity.studyReviews.total} ${cardLabel(activity.studyReviews.total)} в учебных режимах`);
+  const uniqueCards = uniqueCardCount(activity);
+  const cardReviews = cardReviewCount(activity);
+  const games = matchingGameCount(activity);
+  if (uniqueCards > 0) {
+    facts.push(`${uniqueCards} ${cardLabel(uniqueCards)} уникально`);
   }
-  if (activity.practiceReviews.total > 0) {
-    facts.push(`${activity.practiceReviews.total} ${cardLabel(activity.practiceReviews.total)} в практике`);
+  if (cardReviews > 0) {
+    facts.push(`${cardReviews} ${reviewLabel(cardReviews)} карточек всего`);
   }
-  if (activity.matchingAttempts.columns > 0) {
-    facts.push(`${activity.matchingAttempts.columns} раз режим Колонки`);
-  }
-  if (activity.matchingAttempts.audioColumns > 0) {
-    facts.push(`${activity.matchingAttempts.audioColumns} раз режим Колонки аудио`);
+  if (games > 0) {
+    facts.push(`${games} ${gameLabel(games)} в Колонки`);
   }
   return facts.join("; ") || `${capitalize(periodLabel)} есть занятия.`;
 }
@@ -627,8 +630,8 @@ function activityEffort(activity) {
   if (!activity.active) {
     return "none";
   }
-  const studyCount = activity.studyReviews.total + activity.practiceReviews.total;
-  const matchingCount = activity.matchingAttempts.total;
+  const studyCount = cardReviewCount(activity);
+  const matchingCount = matchingGameCount(activity);
 
   if (studyCount >= 30 || (studyCount >= 20 && matchingCount >= 1) || matchingCount >= 4) {
     return "strong";
@@ -1072,6 +1075,57 @@ function cardLabel(count) {
     return "карточки";
   }
   return "карточек";
+}
+
+function reviewLabel(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "просмотр";
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "просмотра";
+  }
+  return "просмотров";
+}
+
+function gameLabel(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return "игра";
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "игры";
+  }
+  return "игр";
+}
+
+function uniqueCardCount(activity) {
+  return numberField(activity.uniqueCards?.total, activity.studyReviews?.total);
+}
+
+function cardReviewCount(activity) {
+  return numberField(
+    activity.cardReviews?.total,
+    numberField(activity.studyReviews?.total) + numberField(activity.practiceReviews?.total),
+  );
+}
+
+function matchingGameCount(activity) {
+  return numberField(
+    activity.matchingAttempts?.total,
+    numberField(activity.matchingAttempts?.columns) + numberField(activity.matchingAttempts?.audioColumns),
+  );
+}
+
+function numberField(...values) {
+  for (const value of values) {
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return 0;
 }
 
 function pad2(value) {
