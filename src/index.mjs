@@ -11,7 +11,7 @@ const dateArg = rawArgs.find((arg) => arg.startsWith("--date="))?.slice("--date=
 const providerArg = rawArgs.find((arg) => arg.startsWith("--provider="))?.slice("--provider=".length);
 const jobArg = rawArgs.find((arg) => arg.startsWith("--job="))?.slice("--job=".length);
 const dryRun = args.has("--dry-run");
-const reminderText = "Повтори картыыыыыы. Хотя бы 5 минут.";
+const reminderText = "Посмотри карточки вечером хотя бы 5 минут.";
 const serverFetchRetries = 2;
 const serverFetchRetryDelayMs = 1_000;
 
@@ -377,7 +377,7 @@ async function formatDailyMessage(activity, options = {}) {
     try {
       const text = await formatWithLlm(activity, options);
       if (text?.trim()) {
-        return text;
+        return text.trim();
       }
       logWarn("LLM returned empty text; using fallback", {
         provider: config.llmProvider,
@@ -404,7 +404,7 @@ function formatFallbackMessage(activity, options = {}) {
   if (!activity.active) {
     if (options.kind === "report" || options.kind === "stats") {
       const periodLabel = options.periodLabel || "сегодня";
-      return `${profile.displayName}: ${periodLabel} ${inactivePastVerb(profile.gender)}. Карты скучали без дела.`;
+      return `${profile.displayName}: ${periodLabel} ${inactivePastVerb(profile.gender)}. Можно вернуться к карточкам позже.`;
     }
     return `${stretchedName(profile.displayName)}! ${reminderText}`;
   }
@@ -464,7 +464,7 @@ async function formatWithGemini(activity, options = {}) {
 
 function geminiGenerationConfig() {
   const configValue = {
-    temperature: 0.8,
+    temperature: 0.45,
     maxOutputTokens: config.geminiModel.includes("pro") ? 800 : 180,
   };
   if (!config.geminiModel.includes("pro")) {
@@ -528,7 +528,7 @@ async function formatWithAnthropic(activity, options = {}) {
     body: JSON.stringify({
       model: config.anthropicModel,
       max_tokens: 180,
-      temperature: 0.8,
+      temperature: 0.45,
       messages: [
         {
           role: "user",
@@ -556,41 +556,53 @@ function llmPrompt(activity, options = {}) {
   const periodLabel = options.periodLabel || "сегодня";
   const facts = activityFacts(activity, periodLabel);
   const effort = activityEffort(activity);
-  const contextRules = kind === "reminder"
-    ? "Задача: написать короткое вечернее напоминание ребёнку, который сегодня не занимался."
-    : kind === "stats"
-      ? "Задача: написать одну короткую строку для отчёта родителю за сегодня по команде /stats."
-    : "Задача: написать одну короткую строку для утреннего отчёта родителю за вчера.";
+  const styleVariant = messageStyleVariant(kind, effort);
+  const actionVariant = messageActionVariant(kind, effort);
+  const task = messageTaskInstruction(kind, profile.displayName);
 
-  return `${contextRules}
+  return `Задача:
+${task}
 
-Ограничения:
-- Пиши по-русски.
-- Обращайся к ребёнку по имени: ${profile.displayName}.
+Персона:
+Ты Лера. Ты взрослый человек в семейном чате: умная, темпераментная, тёплая, иногда резкая, но вменяемая.
+Ты не бот-мотиватор, не учитель, не психолог и не клоун. Ты говоришь как живой человек, который на стороне ребёнка.
+Твоя эмоция должна быть реакцией на ситуацию, а не украшением текста.
+
+Адресат и факты:
+- Имя: ${profile.displayName}.
 - ${genderInstruction(profile.gender)}
-- Используй только факты из блока ниже.
-- Не добавляй списки, заголовки, эмодзи и кавычки вокруг сообщения.
-- Не объясняй, что ты делаешь.
-- Сообщение должно быть коротким.
+- Тип сообщения: ${kind}.
+- Период: ${periodLabel}.
+- Факты: ${facts}
+- Используй только эти факты. Не придумывай причины, чувства, планы, обещания и последствия.
 
-Стиль:
-- Живо и естественно.
-- Можно слегка подшутить, если занятий мало или нет.
-- Не дави и не стыди.
-- Не используй готовые канцелярские формулы.
+Как писать:
+- Русский, одно-два коротких предложения.
+- Обратись по имени.
+- Разговорная семейная речь: ясно, живо, без канцелярита и без сюсюканья.
+- Можно использовать короткий эмоциональный жест: вытянутое имя, междометие, паузу, тире, резкий поворот фразы. Только если это звучит естественно.
+- Не начинай автоматически с факта. Можно сначала позвать по имени, отреагировать коротко, а факт встроить дальше.
+- Не пытайся быть оригинальной. Если выбираешь между простой человеческой фразой и красивым образом, выбирай простую фразу.
+- Не копируй формулировки инструкций дословно.
 
-Дополнительно для этого сообщения:
-${messageKindInstruction(kind)}
+Намерение:
+${messageIntentInstruction(kind, effort)}
+${actionVariant ? `- Смысл маленького действия для этого сообщения: ${actionVariant}` : ""}
 
-Уровень активности:
-${activityToneInstruction(effort)}
+Интонация этого сообщения:
+- ${styleVariant}
 
-Факты:
-${facts}
+Жёсткие границы:
+- Не стыдить, не угрожать, не давить, не требовать отчёт, не писать "жду".
+- Не звучать как контролёр: без "надо", "должна", "опять", "ну ты даёшь", "ай-ай-ай", "как так".
+- Не оценивать весь день ребёнка и его личность.
+- Не делать сообщение про Леру: без "я отстану", "мне спокойнее", "я рядом".
+- Не говорить про мозг, голову, память, нервы, психику или тело ребёнка.
+- Абстрактные вещи ничего не делают: день, вечер, время, учёба, занятия и карточки не притворяются, не скучают, не проходят мимо, не зовут и не ждут.
+- Никакой псевдопоэзии, образных метафор, интернетного юмора и "нейросетевой милоты".
+- После "давай" используй нормальную живую грамматику: "давай глянем", "давай открой", "давай коротко пройти". Не пиши "давай откроешь" и не ставь прошедшее время.
 
-Уровень активности: ${effort}.
-
-JSON для проверки:
+Проверочные данные:
 ${JSON.stringify({
   learnerName: profile.displayName,
   learnerGender: profile.gender,
@@ -608,7 +620,7 @@ ${JSON.stringify({
 
 function activityFacts(activity, periodLabel = "сегодня") {
   if (!activity.active) {
-    return `${capitalize(periodLabel)} занятий не было.`;
+    return `${capitalize(periodLabel)} карточек не было.`;
   }
 
   const facts = [];
@@ -659,7 +671,7 @@ function fallbackClosing(effort) {
   if (effort === "medium") {
     return "Хорошо закрепили: повторили и двигаемся дальше.";
   }
-  return "Это был трейлер занятия, не полная серия. Можно добить ещё пару карточек позже.";
+  return "Начало есть. Можно добить ещё пару карточек позже.";
 }
 
 function learnerProfile(activity) {
@@ -679,39 +691,82 @@ function genderInstruction(gender) {
   return "Если нужен глагол в прошедшем времени, избегай рода или пиши нейтрально.";
 }
 
-function messageKindInstruction(kind) {
+function messageTaskInstruction(kind, displayName) {
   if (kind === "reminder") {
-    return [
-      "- Это вечернее напоминание за сегодня.",
-      "- Используй протяжный зов, как будто зовёшь из соседней комнаты.",
-      "- Мягко мотивируй быстро просмотреть карточки вечером.",
-      "- Не говори про завтра.",
-      "- Не завершай мыслью, что можно отдыхать или ничего не делать.",
-    ].join("\n");
+    return `Напиши вечернее сообщение ребёнку ${displayName}, если сегодня занятий с карточками не было.`;
   }
   if (kind === "stats") {
-    return [
-      "- Это отчёт по запросу за сегодня.",
-      "- Если занятий не было, напиши об этом спокойно, но можно с лёгким стёбом.",
-    ].join("\n");
+    return `Напиши одну строку для родителя по сегодняшней статистике ребёнка ${displayName}.`;
   }
-  return [
-    "- Это утренний отчёт за вчера.",
-    "- Если занятий не было, напиши об этом спокойно, но можно с лёгким стёбом.",
-  ].join("\n");
+  return `Напиши одну строку для родителя по вчерашней статистике ребёнка ${displayName}.`;
 }
 
-function activityToneInstruction(effort) {
+function messageIntentInstruction(kind, effort) {
+  if (kind === "reminder") {
+    return [
+      "- Это вечернее напоминание за сегодня, не разговор про завтра.",
+      "- Если занятий не было, скажи это прямо и предложи одно маленькое действие вечером примерно на 5 минут.",
+      "- Не заканчивай мыслью, что можно ничего не делать или отдыхать.",
+    ].join("\n");
+  }
+
   if (effort === "none") {
-    return "- Занятий не было: можно мягко подшутить.";
+    return "- Занятий не было: сообщи это спокойно и прямо, без упрёка.";
   }
   if (effort === "small") {
-    return "- Занятий мало: не хвали, лучше слегка поддень без грубости.";
+    return "- Занятий мало: отметь начало и мягко подтолкни добавить немного.";
   }
   if (effort === "medium") {
-    return "- Занятий нормально: можно коротко одобрить.";
+    return "- Занятий нормально: коротко отметь нормальный темп.";
   }
-  return "- Занятий много: можно похвалить ярче.";
+  return "- Занятий много: похвали ярче, но без театрального восторга.";
+}
+
+function messageStyleVariant(kind, effort) {
+  const variants = [];
+  if (kind === "reminder" && effort === "none") {
+    variants.push(
+      "мягкий короткий толчок; без драматизма",
+      "энергичный мини-пинок; бодро, без контроля",
+      "спокойная Лера; тепло, прямо и без лишних украшений",
+      "ироничная Лера; ирония только про маленький размер задачи",
+      "нежная Лера; очень коротко, но с ощущением поддержки",
+    );
+  } else if (effort === "small") {
+    variants.push(
+      "мягко попросить добавить ещё немного",
+      "коротко подбодрить без похвалы за подвиг",
+      "чуть иронично отметить, что начало уже есть",
+    );
+  } else if (effort === "medium") {
+    variants.push(
+      "коротко одобрить и закрепить ощущение нормального темпа",
+      "спокойно отметить, что работа сделана",
+      "тепло, без чрезмерной похвалы",
+    );
+  } else {
+    variants.push(
+      "ярко похвалить, но не превращать сообщение в салют",
+      "дать эмоциональное одобрение за сильную работу",
+      "тепло и энергично отметить хороший объём",
+    );
+  }
+  return variants[Math.floor(Math.random() * variants.length)];
+}
+
+function messageActionVariant(kind, effort) {
+  if (kind !== "reminder" || effort !== "none") {
+    return "";
+  }
+  const variants = [
+    "глянуть карточки около 5 минут",
+    "пролистать несколько карточек вечером",
+    "сделать короткий заход на 5 минут",
+    "открыть карточки и посмотреть пару штук",
+    "быстро повторить несколько карточек",
+    "выделить карточкам один маленький вечерний подход",
+  ];
+  return variants[Math.floor(Math.random() * variants.length)];
 }
 
 function inactivePastVerb(gender) {
