@@ -403,13 +403,16 @@ function formatFallbackMessage(activity, options = {}) {
   const profile = learnerProfile(activity);
   if (!activity.active) {
     if (options.kind === "report" || options.kind === "stats") {
-      const periodLabel = options.periodLabel || "сегодня";
-      return `${profile.displayName}: ${periodLabel} ${inactivePastVerb(profile.gender)}. Можно вернуться к карточкам позже.`;
+      return `${profile.displayName}: карточек не было.`;
     }
     return `${stretchedName(profile.displayName)}! ${reminderText}`;
   }
 
   const effort = activityEffort(activity);
+  if (options.kind === "report" || options.kind === "stats") {
+    return `${profile.displayName}: ${briefEffortText(effort)}.`;
+  }
+
   const periodLabel = options.periodLabel || "сегодня";
   const uniqueCards = uniqueCardCount(activity);
   const cardReviews = cardReviewCount(activity);
@@ -630,16 +633,17 @@ function reportPrompt(activity, options = {}) {
   const profile = learnerProfile(activity);
   const kind = options.kind || "report";
   const periodLabel = options.periodLabel || "сегодня";
-  const facts = activityFacts(activity, periodLabel);
   const effort = activityEffort(activity);
+  const briefSummary = briefEffortText(effort);
 
   return `Задача:
-Напиши одну строку для родителя в групповом отчёте по занятиям ребёнка.
+Напиши очень короткую строку для родителя в групповом отчёте по занятиям ребёнка.
 
 Контекст:
 - Это не сообщение ребёнку.
 - Не обращайся к ребёнку напрямую.
 - Строка будет стоять после маркера списка, рядом с такими же строками по другим детям.
+- Заголовок отчёта уже содержит период, поэтому период можно не повторять.
 
 Факты:
 - Имя ребёнка: ${profile.displayName}.
@@ -647,15 +651,13 @@ function reportPrompt(activity, options = {}) {
 - Тип отчёта: ${kind}.
 - Период: ${periodLabel}.
 - Активность: ${effort}.
-- Данные: ${facts}
+- Краткий итог: ${briefSummary}.
 
 Как писать:
 - Русский, одна короткая строка.
 - Начни с имени ребёнка и двоеточия.
-- Пиши для родителя: спокойно, ясно, по делу.
-- Используй только факты выше.
-- Для активных занятий можно коротко отметить объём: спокойно, хорошо, сильно.
-- Если занятий не было, просто напиши, что карточек не было.
+- Пиши для родителя: спокойно, ясно, без подробной статистики.
+- Верни ровно эту строку: ${profile.displayName}: ${briefSummary}
 
 Жёсткие границы:
 - Не пиши ребёнку на "ты".
@@ -664,6 +666,8 @@ function reportPrompt(activity, options = {}) {
 - Не используй "ноль", "умница", "молодец", "справился/справилась с паузой", "ок, просто отмечаю".
 - Не оживляй карточки, день, занятия, время или паузу.
 - Не придумывай причины, чувства, планы, обещания и последствия.
+- Не указывай числа, минуты, время, количество карточек, просмотров, игр или пар.
+- Не перечисляй подробности занятия.
 
 Проверочные данные:
 ${JSON.stringify({
@@ -673,11 +677,8 @@ ${JSON.stringify({
   periodLabel,
   active: activity.active,
   dayKey: activity.dayKey,
-  uniqueCards: activity.uniqueCards,
-  cardReviews: activity.cardReviews,
-  matchingAttempts: activity.matchingAttempts,
-  studyTime: activity.studyTime,
   effort,
+  briefSummary,
 })}`;
 }
 
@@ -735,6 +736,19 @@ function fallbackClosing(effort) {
     return "Хорошо закрепили: повторили и двигаемся дальше.";
   }
   return "Начало есть. Можно добить ещё пару карточек позже.";
+}
+
+function briefEffortText(effort) {
+  if (effort === "strong") {
+    return "сильная работа, хороший объём карточек";
+  }
+  if (effort === "medium") {
+    return "нормальный темп, занятие засчитано";
+  }
+  if (effort === "small") {
+    return "маленькое начало, можно продолжить позже";
+  }
+  return "карточек не было";
 }
 
 function learnerProfile(activity) {
