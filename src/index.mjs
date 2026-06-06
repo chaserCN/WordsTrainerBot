@@ -14,6 +14,7 @@ const dryRun = args.has("--dry-run");
 const reminderText = "Посмотри карточки вечером хотя бы 5 минут.";
 const serverFetchRetries = 2;
 const serverFetchRetryDelayMs = 1_000;
+const llmThinkingEnabled = booleanEnv("LLM_THINKING_ENABLED", true);
 
 if (args.has("--help")) {
   printHelp();
@@ -39,14 +40,16 @@ const config = {
     "LLM_ENABLED",
     Boolean(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY),
   ),
+  llmThinkingEnabled,
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  geminiThinkingBudget: integerEnv("GEMINI_THINKING_BUDGET", 512),
   geminiApiBaseUrl: (process.env.GEMINI_API_BASE_URL || "https://generativelanguage.googleapis.com/v1beta")
     .replace(/\/+$/, ""),
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiModel: process.env.OPENAI_MODEL || "gpt-5.4",
   openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT
-    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5.4"),
+    || defaultOpenAIReasoningEffort(process.env.OPENAI_MODEL || "gpt-5.4", llmThinkingEnabled),
   openaiApiBaseUrl: (process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, ""),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5",
@@ -376,10 +379,11 @@ async function formatDailyMessage(activity, options = {}) {
   if (config.llmEnabled && providerApiKey(config.llmProvider)) {
     try {
       const text = await formatWithLlm(activity, options);
-      if (text?.trim()) {
-        return text.trim();
+      const normalized = normalizeLlmText(text, activity, options);
+      if (normalized) {
+        return normalized;
       }
-      logWarn("LLM returned empty text; using fallback", {
+      logWarn("LLM returned unusable text; using fallback", {
         provider: config.llmProvider,
         model: providerModel(config.llmProvider),
         kind: options.kind || "report",
@@ -403,14 +407,14 @@ function formatFallbackMessage(activity, options = {}) {
   const profile = learnerProfile(activity);
   if (!activity.active) {
     if (options.kind === "report" || options.kind === "stats") {
-      return `${profile.displayName}: карточек не было.`;
+      return fallbackReportLine(profile, "none", activity, options.periodLabel);
     }
     return `${stretchedName(profile.displayName)}! ${reminderText}`;
   }
 
   const effort = activityEffort(activity);
   if (options.kind === "report" || options.kind === "stats") {
-    return `${profile.displayName}: ${briefEffortText(effort)}.`;
+    return fallbackReportLine(profile, effort, activity, options.periodLabel);
   }
 
   const periodLabel = options.periodLabel || "сегодня";
@@ -468,17 +472,30 @@ async function formatWithGemini(activity, options = {}) {
 function geminiGenerationConfig() {
   const configValue = {
     temperature: 0.45,
-    maxOutputTokens: config.geminiModel.includes("pro") ? 800 : 180,
+    maxOutputTokens: geminiMaxOutputTokens(),
   };
   if (!config.geminiModel.includes("pro")) {
     configValue.thinkingConfig = {
-      thinkingBudget: 0,
+      thinkingBudget: config.llmThinkingEnabled ? Math.max(0, config.geminiThinkingBudget) : 0,
     };
   }
   return configValue;
 }
 
-function defaultOpenAIReasoningEffort(model) {
+function geminiMaxOutputTokens() {
+  if (config.geminiModel.includes("pro")) {
+    return config.llmThinkingEnabled ? 1_200 : 800;
+  }
+  if (config.llmThinkingEnabled) {
+    return Math.max(700, config.geminiThinkingBudget + 220);
+  }
+  return 220;
+}
+
+function defaultOpenAIReasoningEffort(model, thinkingEnabled) {
+  if (thinkingEnabled) {
+    return "minimal";
+  }
   if (/^gpt-5\.[1-9]/.test(model)) {
     return "none";
   }
@@ -634,7 +651,9 @@ function reportPrompt(activity, options = {}) {
   const kind = options.kind || "report";
   const periodLabel = options.periodLabel || "сегодня";
   const effort = activityEffort(activity);
-  const briefSummary = briefEffortText(effort);
+  const facts = activityFacts(activity, periodLabel);
+  const styleVariant = messageStyleVariant(kind, effort);
+  const fallbackExample = fallbackReportLine(profile, effort, activity, periodLabel);
 
   return `Задача:
 Напиши очень короткую строку для родителя в групповом отчёте по занятиям ребёнка.
@@ -651,22 +670,31 @@ function reportPrompt(activity, options = {}) {
 - Тип отчёта: ${kind}.
 - Период: ${periodLabel}.
 - Активность: ${effort}.
-- Краткий итог: ${briefSummary}.
+- Факты: ${facts}
+- Используй только эти факты. Не придумывай причины, чувства, планы, обещания и последствия.
 
 Как писать:
 - Русский, одна короткая строка.
 - Начни с имени ребёнка и двоеточия.
-- Пиши для родителя: спокойно, ясно, без подробной статистики.
-- Верни ровно эту строку: ${profile.displayName}: ${briefSummary}
+- Пиши для родителя: спокойно, ясно, живым семейным языком.
+- Не возвращай готовый шаблон из инструкций. Сформулируй строку заново под конкретные факты.
+- Можно упомянуть один конкретный факт, если он делает строку понятнее: карточки, повторы, игру или короткое время.
+- Если упоминаешь игру, называй её "Колонки".
+- Не перечисляй всю статистику подряд.
+- Не используй одинаковую фразу для strong, medium и small.
+- Пример уровня конкретики, не копировать дословно: ${fallbackExample}
+
+Интонация этой строки:
+- ${styleVariant}
 
 Жёсткие границы:
 - Не пиши ребёнку на "ты".
 - Не хвали за отсутствие занятий.
 - Не стыди и не подкалывай за отсутствие занятий.
-- Не используй "ноль", "умница", "молодец", "справился/справилась с паузой", "ок, просто отмечаю".
+- Не используй "ноль", "умница", "молодец", "справился/справилась с паузой", "ок, просто отмечаю", "сильная работа, хороший объём карточек", "карточек не было".
 - Не оживляй карточки, день, занятия, время или паузу.
 - Не придумывай причины, чувства, планы, обещания и последствия.
-- Не указывай числа, минуты, время, количество карточек, просмотров, игр или пар.
+- Не перегружай числами: максимум один числовой факт.
 - Не перечисляй подробности занятия.
 
 Проверочные данные:
@@ -677,14 +705,14 @@ ${JSON.stringify({
   periodLabel,
   active: activity.active,
   dayKey: activity.dayKey,
+  facts,
   effort,
-  briefSummary,
 })}`;
 }
 
 function activityFacts(activity, periodLabel = "сегодня") {
   if (!activity.active) {
-    return `${capitalize(periodLabel)} карточек не было.`;
+    return `${capitalize(periodLabel)} без занятий с карточками.`;
   }
 
   const facts = [];
@@ -738,17 +766,137 @@ function fallbackClosing(effort) {
   return "Начало есть. Можно добить ещё пару карточек позже.";
 }
 
-function briefEffortText(effort) {
+function fallbackReportLine(profile, effort, activity, periodLabel = "сегодня") {
+  if (effort === "none") {
+    return randomChoice([
+      `${profile.displayName}: занятий с карточками не было.`,
+      `${profile.displayName}: без карточек ${periodLabel}.`,
+      `${profile.displayName}: по карточкам пауза, занятий не было.`,
+    ]);
+  }
+
+  const uniqueCards = uniqueCardCount(activity);
+  const cardReviews = cardReviewCount(activity);
+  const games = matchingGameCount(activity);
+  const matchingPairs = matchingPairCount(activity);
+  const studyTime = studyTimeText(activity);
+  const completed = gendered(profile.gender, "прошёл", "прошла", "занятие было");
+  const opened = gendered(profile.gender, "разобрал", "разобрала", "разобрали");
+  const started = gendered(profile.gender, "начал", "начала", "начали");
+  const played = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
+
   if (effort === "strong") {
-    return "сильная работа, хороший объём карточек";
+    if (uniqueCards > 0) {
+      return `${profile.displayName}: ${completed} хороший блок, ${uniqueCards} ${cardLabel(uniqueCards)} - плотная работа.`;
+    }
+    if (matchingPairs > 0) {
+      return `${profile.displayName}: сильно ${played} в Колонки, ${matchingPairs} ${pairLabel(matchingPairs)} собрано.`;
+    }
+    return `${profile.displayName}: занятие получилось плотным, темп хороший.`;
   }
+
   if (effort === "medium") {
-    return "нормальный темп, занятие засчитано";
+    if (uniqueCards > 0) {
+      return `${profile.displayName}: ${opened} ${uniqueCards} ${cardLabel(uniqueCards)}, нормальный рабочий темп.`;
+    }
+    if (games > 0) {
+      return `${profile.displayName}: Колонки засчитаны, ${games} ${gameLabel(games)} - хороший короткий заход.`;
+    }
+    return `${profile.displayName}: занятие засчитано, без провала по темпу.`;
   }
-  if (effort === "small") {
-    return "маленькое начало, можно продолжить позже";
+
+  if (cardReviews > 0) {
+    return `${profile.displayName}: ${started} с малого, ${cardReviews} ${reviewLabel(cardReviews)} - уже не пусто.`;
   }
-  return "карточек не было";
+  if (games > 0) {
+    return `${profile.displayName}: был маленький заход в Колонки, можно добавить карточки позже.`;
+  }
+  return `${profile.displayName}: начало есть${studyTime ? `, ${studyTime}` : ""}; можно продолжить позже.`;
+}
+
+function normalizeLlmText(text, activity, options = {}) {
+  if (typeof text !== "string") {
+    return null;
+  }
+  const line = text
+    .trim()
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[-*]\s+/, "")
+    .trim();
+  if (!line) {
+    return null;
+  }
+
+  const kind = options.kind || "report";
+  if (kind !== "report" && kind !== "stats") {
+    return line;
+  }
+
+  const profile = learnerProfile(activity);
+  if (!line.startsWith(`${profile.displayName}:`)) {
+    return null;
+  }
+  if (looksIncompleteSentence(line)) {
+    return null;
+  }
+  if (isGenericReportTemplate(line, profile.displayName)) {
+    return null;
+  }
+  return line;
+}
+
+function looksIncompleteSentence(line) {
+  if (/[,:;-]$/.test(line)) {
+    return true;
+  }
+  const words = line.toLowerCase().split(/\s+/);
+  const lastWord = words.at(-1)?.replace(/[.!?]+$/g, "");
+  return [
+    "а",
+    "без",
+    "в",
+    "для",
+    "и",
+    "к",
+    "на",
+    "но",
+    "о",
+    "по",
+    "с",
+    "у",
+    "что",
+    "это",
+  ].includes(lastWord);
+}
+
+function isGenericReportTemplate(line, displayName) {
+  const prefix = `${displayName}:`;
+  const tail = line
+    .slice(prefix.length)
+    .trim()
+    .replace(/[.!]+$/g, "")
+    .toLowerCase();
+  return [
+    "сильная работа, хороший объём карточек",
+    "нормальный темп, занятие засчитано",
+    "маленькое начало, можно продолжить позже",
+    "карточек не было",
+  ].includes(tail);
+}
+
+function gendered(gender, male, female, neutral) {
+  if (gender === "male") {
+    return male;
+  }
+  if (gender === "female") {
+    return female;
+  }
+  return neutral;
+}
+
+function randomChoice(values) {
+  return values[Math.floor(Math.random() * values.length)];
 }
 
 function learnerProfile(activity) {

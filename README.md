@@ -57,11 +57,15 @@ Optional env:
 - `LLM_ENABLED` - enables LLM formatting when `true`. Defaults to enabled only
   if a provider API key is set.
 - `LLM_PROVIDER` - `gemini`, `openai`, or `anthropic`.
+- `LLM_THINKING_ENABLED` - set to `false` to disable low-budget reasoning
+  where the selected provider supports it.
 - `GEMINI_API_KEY` - Gemini API key.
 - `GEMINI_MODEL` - defaults to `gemini-2.5-flash`.
+- `GEMINI_THINKING_BUDGET` - defaults to `512` when thinking is enabled.
 - `GEMINI_API_BASE_URL` - defaults to the public Gemini v1beta REST API.
 - `OPENAI_API_KEY` - OpenAI API key.
 - `OPENAI_MODEL` - defaults to `gpt-5.4`.
+- `OPENAI_REASONING_EFFORT` - overrides the default OpenAI reasoning effort.
 - `OPENAI_API_BASE_URL` - defaults to `https://api.openai.com/v1`.
 - `ANTHROPIC_API_KEY` - Anthropic API key.
 - `ANTHROPIC_MODEL` - defaults to `claude-haiku-4-5`.
