@@ -15,6 +15,7 @@ const reminderText = "Посмотри карточки вечером хотя 
 const serverFetchRetries = 2;
 const serverFetchRetryDelayMs = 1_000;
 const llmThinkingEnabled = booleanEnv("LLM_THINKING_ENABLED", true);
+const alreadyDoneLogged = new Set();
 
 if (args.has("--help")) {
   printHelp();
@@ -286,7 +287,7 @@ async function sendMorningReport(dayKey, { dryRun }) {
   const stateKey = sentStateKey("morning-report", dayKey);
   const state = dryRun ? null : await readState();
   if (!dryRun && isSent(state, stateKey)) {
-    console.log(`Morning report already sent for ${dayKey}`);
+    logAlreadyDone(stateKey, `Morning report already sent for ${dayKey}`);
     return;
   }
 
@@ -329,7 +330,7 @@ async function sendEveningReminders(dayKey, { dryRun }) {
   const jobStateKey = sentStateKey("evening-reminders", dayKey);
   const state = dryRun ? null : await readState();
   if (!dryRun && isSent(state, jobStateKey)) {
-    console.log(`Evening reminders already checked for ${dayKey}`);
+    logAlreadyDone(jobStateKey, `Evening reminders already checked for ${dayKey}`);
     return;
   }
 
@@ -493,11 +494,9 @@ function geminiMaxOutputTokens() {
 }
 
 function defaultOpenAIReasoningEffort(model, thinkingEnabled) {
-  if (thinkingEnabled) {
-    return "minimal";
-  }
   if (/^gpt-5\.[1-9]/.test(model)) {
-    return "none";
+    // gpt-5.x reasoning models reject "minimal"; "low" is the smallest valid effort.
+    return thinkingEnabled ? "low" : "none";
   }
   return "minimal";
 }
@@ -1129,6 +1128,14 @@ function isRetryableFetchError(error) {
     || code === "ECONNREFUSED"
     || code === "ETIMEDOUT"
     || code === "EAI_AGAIN";
+}
+
+function logAlreadyDone(key, message) {
+  if (alreadyDoneLogged.has(key)) {
+    return;
+  }
+  alreadyDoneLogged.add(key);
+  console.log(message);
 }
 
 function logError(message, error, fields = {}) {
