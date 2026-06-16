@@ -418,15 +418,13 @@ function formatFallbackMessage(activity, options = {}) {
     return fallbackReportLine(profile, effort, activity, options.periodLabel);
   }
 
-  const periodLabel = options.periodLabel || "сегодня";
-  const uniqueCards = uniqueCardCount(activity);
-  const cardReviews = cardReviewCount(activity);
-  const games = matchingGameCount(activity);
-  return [
-    `${profile.displayName}: ${periodLabel} есть занятия.`,
-    `Карточки: ${uniqueCards} ${cardLabel(uniqueCards)}, просмотров: ${cardReviews}, игры: ${games}.`,
-    fallbackClosing(effort),
-  ].join("\n");
+  // Без чисел и оценки объёма: отмечаем только сам факт занятия.
+  const played = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
+  const studied = gendered(profile.gender, "позанимался", "позанималась", "позанимались");
+  if (matchingGameCount(activity) > 0 && cardReviewCount(activity) === 0) {
+    return `${profile.displayName}: ${played} в Колонки.`;
+  }
+  return `${profile.displayName}: ${studied} с карточками.`;
 }
 
 async function formatWithLlm(activity, options = {}) {
@@ -637,10 +635,7 @@ ${JSON.stringify({
   periodLabel,
   active: activity.active,
   dayKey: activity.dayKey,
-  uniqueCards: activity.uniqueCards,
-  cardReviews: activity.cardReviews,
-  matchingAttempts: activity.matchingAttempts,
-  studyTime: activity.studyTime,
+  facts,
   effort,
 })}`;
 }
@@ -668,7 +663,7 @@ function reportPrompt(activity, options = {}) {
 - ${genderInstruction(profile.gender)}
 - Тип отчёта: ${kind}.
 - Период: ${periodLabel}.
-- Активность: ${effort}.
+- Занятие было: ${activity.active ? "да" : "нет"}.
 - Факты: ${facts}
 - Используй только эти факты. Не придумывай причины, чувства, планы, обещания и последствия.
 
@@ -677,10 +672,10 @@ function reportPrompt(activity, options = {}) {
 - Начни с имени ребёнка и двоеточия.
 - Пиши для родителя: спокойно, ясно, живым семейным языком.
 - Не возвращай готовый шаблон из инструкций. Сформулируй строку заново под конкретные факты.
-- Можно упомянуть один конкретный факт, если он делает строку понятнее: карточки, повторы, игру или короткое время.
+- Можно упомянуть вид занятия, если это делает строку понятнее: карточки или игру.
 - Если упоминаешь игру, называй её "Колонки".
-- Не перечисляй всю статистику подряд.
-- Не используй одинаковую фразу для strong, medium и small.
+- Не пиши числа: ни сколько карточек, ни сколько повторов, ни сколько игр, ни сколько времени.
+- Не оценивай объём: никаких "много", "мало", "плотно", "сильно", "хороший объём", "целый блок", "чуть-чуть".
 - Пример уровня конкретики, не копировать дословно: ${fallbackExample}
 
 Интонация этой строки:
@@ -693,7 +688,7 @@ function reportPrompt(activity, options = {}) {
 - Не используй "ноль", "умница", "молодец", "справился/справилась с паузой", "ок, просто отмечаю", "сильная работа, хороший объём карточек", "карточек не было".
 - Не оживляй карточки, день, занятия, время или паузу.
 - Не придумывай причины, чувства, планы, обещания и последствия.
-- Не перегружай числами: максимум один числовой факт.
+- Никаких чисел и оценок объёма: не пиши, сколько карточек, повторов, игр или времени, и не суди, много это или мало.
 - Не перечисляй подробности занятия.
 
 Проверочные данные:
@@ -714,55 +709,24 @@ function activityFacts(activity, periodLabel = "сегодня") {
     return `${capitalize(periodLabel)} без занятий с карточками.`;
   }
 
+  // Объём занятий не сравним между людьми: у одного 25 карточек, у другого 750,
+  // поэтому числа и время сюда не попадают. Отмечаем только сам факт занятия и
+  // какие виды активности были.
   const facts = [];
-  const uniqueCards = uniqueCardCount(activity);
-  const cardReviews = cardReviewCount(activity);
-  const games = matchingGameCount(activity);
-  const matchingPairs = matchingPairCount(activity);
-  const studyTime = studyTimeText(activity);
-  if (uniqueCards > 0) {
-    facts.push(`${uniqueCards} ${cardLabel(uniqueCards)} уникально`);
+  if (cardReviewCount(activity) > 0) {
+    facts.push("занимался с карточками");
   }
-  if (cardReviews > 0) {
-    facts.push(`${cardReviews} ${reviewLabel(cardReviews)} карточек всего`);
+  if (matchingGameCount(activity) > 0) {
+    facts.push("играл в Колонки");
   }
-  if (games > 0) {
-    facts.push(`${games} ${gameLabel(games)} в Колонки`);
-  }
-  if (matchingPairs > 0) {
-    facts.push(`${matchingPairs} ${pairLabel(matchingPairs)} собрано в Колонках`);
-  }
-  if (studyTime) {
-    facts.push(`время занятий: ${studyTime}`);
-  }
-  return facts.join("; ") || `${capitalize(periodLabel)} есть занятия.`;
+  return facts.join("; ") || "занимался с карточками";
 }
 
 function activityEffort(activity) {
-  if (!activity.active) {
-    return "none";
-  }
-  const studyCount = cardReviewCount(activity);
-  const matchingCount = matchingGameCount(activity);
-  const matchingPairs = matchingPairCount(activity);
-
-  if (studyCount >= 30 || matchingPairs >= 60 || (studyCount >= 20 && matchingCount >= 1) || matchingCount >= 4) {
-    return "strong";
-  }
-  if (studyCount >= 10 || matchingPairs >= 20 || matchingCount >= 2 || (studyCount >= 5 && matchingCount >= 1)) {
-    return "medium";
-  }
-  return "small";
-}
-
-function fallbackClosing(effort) {
-  if (effort === "strong") {
-    return "Сильная работа: повторили, повторили, закрепили.";
-  }
-  if (effort === "medium") {
-    return "Хорошо закрепили: повторили и двигаемся дальше.";
-  }
-  return "Начало есть. Можно добить ещё пару карточек позже.";
+  // Объём занятий несравним между людьми (у ребёнка 25 карточек, у взрослого
+  // 750), поэтому больше не делим на strong/medium/small. Важен только факт:
+  // человек сел и позанимался — это хвалим независимо от объёма.
+  return activity.active ? "done" : "none";
 }
 
 function fallbackReportLine(profile, effort, activity, periodLabel = "сегодня") {
@@ -774,43 +738,20 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
     ]);
   }
 
-  const uniqueCards = uniqueCardCount(activity);
-  const cardReviews = cardReviewCount(activity);
-  const games = matchingGameCount(activity);
-  const matchingPairs = matchingPairCount(activity);
-  const studyTime = studyTimeText(activity);
-  const completed = gendered(profile.gender, "прошёл", "прошла", "занятие было");
-  const opened = gendered(profile.gender, "разобрал", "разобрала", "разобрали");
-  const started = gendered(profile.gender, "начал", "начала", "начали");
-  const played = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
+  // Хвалим за сам факт занятия, без чисел и оценки объёма: у разных людей
+  // объём несравним, поэтому говорим только о том, что занятие было.
+  const studied = cardReviewCount(activity) > 0;
+  const played = matchingGameCount(activity) > 0;
+  const studiedVerb = gendered(profile.gender, "позанимался", "позанималась", "позанимались");
+  const playedVerb = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
 
-  if (effort === "strong") {
-    if (uniqueCards > 0) {
-      return `${profile.displayName}: ${completed} хороший блок, ${uniqueCards} ${cardLabel(uniqueCards)} - плотная работа.`;
-    }
-    if (matchingPairs > 0) {
-      return `${profile.displayName}: сильно ${played} в Колонки, ${matchingPairs} ${pairLabel(matchingPairs)} собрано.`;
-    }
-    return `${profile.displayName}: занятие получилось плотным, темп хороший.`;
+  if (studied && played) {
+    return `${profile.displayName}: ${studiedVerb} с карточками и ${playedVerb} в Колонки.`;
   }
-
-  if (effort === "medium") {
-    if (uniqueCards > 0) {
-      return `${profile.displayName}: ${opened} ${uniqueCards} ${cardLabel(uniqueCards)}, нормальный рабочий темп.`;
-    }
-    if (games > 0) {
-      return `${profile.displayName}: Колонки засчитаны, ${games} ${gameLabel(games)} - хороший короткий заход.`;
-    }
-    return `${profile.displayName}: занятие засчитано, без провала по темпу.`;
+  if (played) {
+    return `${profile.displayName}: ${playedVerb} в Колонки.`;
   }
-
-  if (cardReviews > 0) {
-    return `${profile.displayName}: ${started} с малого, ${cardReviews} ${reviewLabel(cardReviews)} - уже не пусто.`;
-  }
-  if (games > 0) {
-    return `${profile.displayName}: был маленький заход в Колонки, можно добавить карточки позже.`;
-  }
-  return `${profile.displayName}: начало есть${studyTime ? `, ${studyTime}` : ""}; можно продолжить позже.`;
+  return `${profile.displayName}: ${studiedVerb} с карточками.`;
 }
 
 function normalizeLlmText(text, activity, options = {}) {
@@ -937,13 +878,10 @@ function messageIntentInstruction(kind, effort) {
   if (effort === "none") {
     return "- Занятий не было: сообщи это спокойно и прямо, без упрёка.";
   }
-  if (effort === "small") {
-    return "- Занятий мало: отметь начало и мягко подтолкни добавить немного.";
-  }
-  if (effort === "medium") {
-    return "- Занятий нормально: коротко отметь нормальный темп.";
-  }
-  return "- Занятий много: похвали ярче, но без театрального восторга.";
+  return [
+    "- Занятие было: тепло отметь сам факт, что ребёнок сел и позанимался.",
+    "- Хвали за факт занятия, а не за объём. Объём разных людей несравним, поэтому не оценивай, много это или мало, и не сравнивай дни между собой.",
+  ].join("\n");
 }
 
 function messageStyleVariant(kind, effort) {
@@ -956,23 +894,11 @@ function messageStyleVariant(kind, effort) {
       "ироничная Лера; ирония только про маленький размер задачи",
       "нежная Лера; очень коротко, но с ощущением поддержки",
     );
-  } else if (effort === "small") {
-    variants.push(
-      "мягко попросить добавить ещё немного",
-      "коротко подбодрить без похвалы за подвиг",
-      "чуть иронично отметить, что начало уже есть",
-    );
-  } else if (effort === "medium") {
-    variants.push(
-      "коротко одобрить и закрепить ощущение нормального темпа",
-      "спокойно отметить, что работа сделана",
-      "тепло, без чрезмерной похвалы",
-    );
   } else {
     variants.push(
-      "ярко похвалить, но не превращать сообщение в салют",
-      "дать эмоциональное одобрение за сильную работу",
-      "тепло и энергично отметить хороший объём",
+      "тепло одобрить сам факт, что ребёнок позанимался",
+      "спокойно и по-доброму отметить, что занятие было",
+      "коротко порадоваться, что ребёнок сел за карточки",
     );
   }
   return variants[Math.floor(Math.random() * variants.length)];
@@ -1362,58 +1288,6 @@ function unquote(value) {
   return value;
 }
 
-function cardLabel(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return "карточка";
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return "карточки";
-  }
-  return "карточек";
-}
-
-function reviewLabel(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return "просмотр";
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return "просмотра";
-  }
-  return "просмотров";
-}
-
-function gameLabel(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return "игра";
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return "игры";
-  }
-  return "игр";
-}
-
-function pairLabel(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) {
-    return "пара";
-  }
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return "пары";
-  }
-  return "пар";
-}
-
-function uniqueCardCount(activity) {
-  return numberField(activity.uniqueCards?.total, activity.studyReviews?.total);
-}
-
 function cardReviewCount(activity) {
   return numberField(
     activity.cardReviews?.total,
@@ -1426,18 +1300,6 @@ function matchingGameCount(activity) {
     activity.matchingAttempts?.total,
     numberField(activity.matchingAttempts?.columns) + numberField(activity.matchingAttempts?.audioColumns),
   );
-}
-
-function matchingPairCount(activity) {
-  return numberField(activity.matchingAttempts?.pairsMatched);
-}
-
-function studyTimeText(activity) {
-  const text = activity.studyTime?.text;
-  if (typeof text !== "string" || !text.trim() || text === "0 сек") {
-    return "";
-  }
-  return text.trim();
 }
 
 function numberField(...values) {
