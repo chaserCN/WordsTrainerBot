@@ -672,8 +672,8 @@ function reportPrompt(activity, options = {}) {
 - Начни с имени ребёнка и двоеточия.
 - Пиши для родителя: спокойно, ясно, живым семейным языком.
 - Не возвращай готовый шаблон из инструкций. Сформулируй строку заново под конкретные факты.
-- Можно упомянуть вид занятия, если это делает строку понятнее: карточки или игру.
-- Если упоминаешь игру, называй её "Колонки".
+- Можно упомянуть вид занятия, если это делает строку понятнее: карточки, картинки или игру.
+- Если упоминаешь игру, называй её "Колонки". Игру со словами по картинке называй "картинки".
 - Не пиши числа: ни сколько карточек, ни сколько повторов, ни сколько игр, ни сколько времени.
 - Не оценивай объём: никаких "много", "мало", "плотно", "сильно", "хороший объём", "целый блок", "чуть-чуть".
 - Пример уровня конкретики, не копировать дословно: ${fallbackExample}
@@ -712,12 +712,20 @@ function activityFacts(activity, periodLabel = "сегодня") {
   // Объём занятий не сравним между людьми: у одного 25 карточек, у другого 750,
   // поэтому числа и время сюда не попадают. Отмечаем только сам факт занятия и
   // какие виды активности были.
+  const pictureCount = pictureChoiceCount(activity);
+  // Картинки тоже попадают в cardReviews (это practice-повторы), поэтому
+  // «карточки» = повторы за вычетом картинок, иначе один заход в картинки
+  // прозвучит и как карточки, и как картинки.
+  const plainCardReviews = cardReviewCount(activity) - pictureCount;
   const facts = [];
-  if (cardReviewCount(activity) > 0) {
+  if (plainCardReviews > 0) {
     facts.push("занимался с карточками");
   }
   if (matchingGameCount(activity) > 0) {
     facts.push("играл в Колонки");
+  }
+  if (pictureCount > 0) {
+    facts.push("решал картинки");
   }
   return facts.join("; ") || "занимался с карточками";
 }
@@ -1300,6 +1308,10 @@ function matchingGameCount(activity) {
     activity.matchingAttempts?.total,
     numberField(activity.matchingAttempts?.columns) + numberField(activity.matchingAttempts?.audioColumns),
   );
+}
+
+function pictureChoiceCount(activity) {
+  return numberField(activity.pictureChoices?.total);
 }
 
 function numberField(...values) {
