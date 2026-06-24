@@ -713,10 +713,11 @@ function activityFacts(activity, periodLabel = "сегодня") {
   // поэтому числа и время сюда не попадают. Отмечаем только сам факт занятия и
   // какие виды активности были.
   const pictureCount = pictureChoiceCount(activity);
+  const writingCount = writingExerciseCount(activity);
   // Картинки тоже попадают в cardReviews (это practice-повторы), поэтому
-  // «карточки» = повторы за вычетом картинок, иначе один заход в картинки
-  // прозвучит и как карточки, и как картинки.
-  const plainCardReviews = cardReviewCount(activity) - pictureCount;
+  // «карточки» = повторы за вычетом отдельных упражнений, иначе один заход
+  // прозвучит и как карточки, и как конкретный режим.
+  const plainCardReviews = cardReviewCount(activity) - pictureCount - writingCount;
   const facts = [];
   if (plainCardReviews > 0) {
     facts.push("занимался с карточками");
@@ -726,6 +727,9 @@ function activityFacts(activity, periodLabel = "сегодня") {
   }
   if (pictureCount > 0) {
     facts.push("решал картинки");
+  }
+  if (writingCount > 0) {
+    facts.push("писал слова");
   }
   return facts.join("; ") || "занимался с карточками";
 }
@@ -748,18 +752,30 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
 
   // Хвалим за сам факт занятия, без чисел и оценки объёма: у разных людей
   // объём несравним, поэтому говорим только о том, что занятие было.
-  const studied = cardReviewCount(activity) > 0;
-  const played = matchingGameCount(activity) > 0;
+  const pictureCount = pictureChoiceCount(activity);
+  const writingCount = writingExerciseCount(activity);
+  const plainCardReviews = cardReviewCount(activity) - pictureCount - writingCount;
+  const playedCount = matchingGameCount(activity);
   const studiedVerb = gendered(profile.gender, "позанимался", "позанималась", "позанимались");
+  const wroteVerb = gendered(profile.gender, "писал", "писала", "писали");
+  const solvedVerb = gendered(profile.gender, "решал", "решала", "решали");
   const playedVerb = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
+  const parts = [];
 
-  if (studied && played) {
-    return `${profile.displayName}: ${studiedVerb} с карточками и ${playedVerb} в Колонки.`;
+  if (plainCardReviews > 0) {
+    parts.push(`${studiedVerb} с карточками`);
   }
-  if (played) {
-    return `${profile.displayName}: ${playedVerb} в Колонки.`;
+  if (writingCount > 0) {
+    parts.push(`${wroteVerb} слова`);
   }
-  return `${profile.displayName}: ${studiedVerb} с карточками.`;
+  if (pictureCount > 0) {
+    parts.push(`${solvedVerb} картинки`);
+  }
+  if (playedCount > 0) {
+    parts.push(`${playedVerb} в Колонки`);
+  }
+
+  return `${profile.displayName}: ${parts.join(" и ") || `${studiedVerb} с карточками`}.`;
 }
 
 function normalizeLlmText(text, activity, options = {}) {
@@ -1312,6 +1328,10 @@ function matchingGameCount(activity) {
 
 function pictureChoiceCount(activity) {
   return numberField(activity.pictureChoices?.total);
+}
+
+function writingExerciseCount(activity) {
+  return numberField(activity.writingExercises?.total);
 }
 
 function numberField(...values) {
