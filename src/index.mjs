@@ -784,7 +784,15 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
     parts.push(`${playedVerb} в Колонки`);
   }
 
-  return `${profile.displayName}: ${parts.join(" и ") || `${studiedVerb} с карточками`}.`;
+  return `${profile.displayName}: ${joinWithAnd(parts) || `${studiedVerb} с карточками`}.`;
+}
+
+// "а" / "а и б" / "а, б и в" — запятые между пунктами, "и" только перед последним.
+function joinWithAnd(parts) {
+  if (parts.length <= 1) {
+    return parts[0] || "";
+  }
+  return `${parts.slice(0, -1).join(", ")} и ${parts[parts.length - 1]}`;
 }
 
 function normalizeLlmText(text, activity, options = {}) {
