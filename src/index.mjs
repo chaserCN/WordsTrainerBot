@@ -672,7 +672,7 @@ function reportPrompt(activity, options = {}) {
 - Начни с имени ребёнка и двоеточия.
 - Пиши для родителя: спокойно, ясно, живым семейным языком.
 - Не возвращай готовый шаблон из инструкций. Сформулируй строку заново под конкретные факты.
-- Можно упомянуть вид занятия, если это делает строку понятнее: карточки, картинки или игру.
+- Можно упомянуть вид занятия, если это делает строку понятнее: карточки, предложения, картинки или игру.
 - Если упоминаешь игру, называй её "Колонки". Игру со словами по картинке называй "картинки".
 - Не пиши числа: ни сколько карточек, ни сколько повторов, ни сколько игр, ни сколько времени.
 - Не оценивай объём: никаких "много", "мало", "плотно", "сильно", "хороший объём", "целый блок", "чуть-чуть".
@@ -712,15 +712,19 @@ function activityFacts(activity, periodLabel = "сегодня") {
   // Объём занятий не сравним между людьми: у одного 25 карточек, у другого 750,
   // поэтому числа и время сюда не попадают. Отмечаем только сам факт занятия и
   // какие виды активности были.
+  const sentenceTotal = sentenceCount(activity);
   const pictureCount = pictureChoiceCount(activity);
   const writingCount = writingExerciseCount(activity);
-  // Картинки тоже попадают в cardReviews (это practice-повторы), поэтому
-  // «карточки» = повторы за вычетом отдельных упражнений, иначе один заход
-  // прозвучит и как карточки, и как конкретный режим.
-  const plainCardReviews = cardReviewCount(activity) - pictureCount - writingCount;
+  // Предложения, картинки и письмо тоже попадают в cardReviews (это
+  // practice-повторы), поэтому «карточки» = повторы за вычетом отдельных
+  // упражнений, иначе один заход прозвучит и как карточки, и как конкретный режим.
+  const plainCardReviews = cardReviewCount(activity) - sentenceTotal - pictureCount - writingCount;
   const facts = [];
   if (plainCardReviews > 0) {
     facts.push("занимался с карточками");
+  }
+  if (sentenceTotal > 0) {
+    facts.push("разбирал предложения");
   }
   if (matchingGameCount(activity) > 0) {
     facts.push("играл в Колонки");
@@ -752,11 +756,13 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
 
   // Хвалим за сам факт занятия, без чисел и оценки объёма: у разных людей
   // объём несравним, поэтому говорим только о том, что занятие было.
+  const sentenceTotal = sentenceCount(activity);
   const pictureCount = pictureChoiceCount(activity);
   const writingCount = writingExerciseCount(activity);
-  const plainCardReviews = cardReviewCount(activity) - pictureCount - writingCount;
+  const plainCardReviews = cardReviewCount(activity) - sentenceTotal - pictureCount - writingCount;
   const playedCount = matchingGameCount(activity);
   const studiedVerb = gendered(profile.gender, "позанимался", "позанималась", "позанимались");
+  const sortedVerb = gendered(profile.gender, "разбирал", "разбирала", "разбирали");
   const wroteVerb = gendered(profile.gender, "писал", "писала", "писали");
   const solvedVerb = gendered(profile.gender, "решал", "решала", "решали");
   const playedVerb = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
@@ -764,6 +770,9 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
 
   if (plainCardReviews > 0) {
     parts.push(`${studiedVerb} с карточками`);
+  }
+  if (sentenceTotal > 0) {
+    parts.push(`${sortedVerb} предложения`);
   }
   if (writingCount > 0) {
     parts.push(`${wroteVerb} слова`);
@@ -1324,6 +1333,10 @@ function matchingGameCount(activity) {
     activity.matchingAttempts?.total,
     numberField(activity.matchingAttempts?.columns) + numberField(activity.matchingAttempts?.audioColumns),
   );
+}
+
+function sentenceCount(activity) {
+  return numberField(activity.sentences?.total);
 }
 
 function pictureChoiceCount(activity) {
