@@ -730,7 +730,7 @@ function activityFacts(activity, periodLabel = "сегодня") {
     facts.push("играл в Колонки");
   }
   if (pictureCount > 0) {
-    facts.push("решал картинки");
+    facts.push("просматривал картинки");
   }
   if (writingCount > 0) {
     facts.push("писал слова");
@@ -764,7 +764,7 @@ function fallbackReportLine(profile, effort, activity, periodLabel = "сегод
   const studiedVerb = gendered(profile.gender, "позанимался", "позанималась", "позанимались");
   const sortedVerb = gendered(profile.gender, "разбирал", "разбирала", "разбирали");
   const wroteVerb = gendered(profile.gender, "писал", "писала", "писали");
-  const solvedVerb = gendered(profile.gender, "решал", "решала", "решали");
+  const solvedVerb = gendered(profile.gender, "просматривал", "просматривала", "просматривали");
   const playedVerb = gendered(profile.gender, "поиграл", "поиграла", "поиграли");
   const parts = [];
 
